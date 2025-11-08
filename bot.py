@@ -1,114 +1,214 @@
-import os
 import json
+import os
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import datetime
 
-# Токен берется из переменных окружения
-BOT_TOKEN = os.environ.get('8443242516:AAGqbOkgQ2eJzQZB5OZev2ylWx94GXZ-apU')
+# Р’РђР–РќРћ: Р—РђРњР•РќРРўР• Р­РўРћРў РўРћРљР•Рќ РќРђ РЎР’РћР™!
+BOT_TOKEN = "8443242516:AAGqbOkgQ2eJzQZB5OZev2ylWx94GXZ-apU"
 
-class FinanceBot:
+class JSONFinanceBot:
     def __init__(self):
+        self.data_file = 'finance_data.json'
         self.user_sessions = {}
+        self.load_data()
+    
+    def load_data(self):
+        if os.path.exists(self.data_file):
+            with open(self.data_file, 'r', encoding='utf-8') as f:
+                self.data = json.load(f)
+        else:
+            self.data = {'records': []}
+            self.save_data()
+    
+    def save_data(self):
+        with open(self.data_file, 'w', encoding='utf-8') as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
     
     def add_record(self, product, input_price, expenses, final_price):
         profit = final_price - input_price - expenses
+        record = {
+            'date': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'product': product,
+            'input_price': input_price,
+            'expenses': expenses,
+            'final_price': final_price,
+            'profit': profit
+        }
+        self.data['records'].append(record)
+        self.save_data()
         return profit
+    
+    def get_statistics(self):
+        records = self.data['records']
+        if not records:
+            return None
+        
+        total_profit = sum(r['profit'] for r in records)
+        total_revenue = sum(r['final_price'] for r in records)
+        total_expenses = sum(r['expenses'] for r in records)
+        
+        return {
+            'total_records': len(records),
+            'total_profit': total_profit,
+            'total_revenue': total_revenue,
+            'total_expenses': total_expenses
+        }
+
+# РЎРѕР·РґР°РµРј Р±РѕС‚Р°
+bot = JSONFinanceBot()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        ['?? Добавить запись', '?? Статистика'], 
-        ['?? Быстрый расчет']
+        ['рџ“Љ Р”РѕР±Р°РІРёС‚СЊ Р·Р°РїРёСЃСЊ', 'рџ“€ РЎС‚Р°С‚РёСЃС‚РёРєР°'], 
+        ['рџ’° Р‘С‹СЃС‚СЂС‹Р№ СЂР°СЃС‡РµС‚', 'рџ“‹ РџРѕСЃР»РµРґРЅРёРµ Р·Р°РїРёСЃРё'],
+        ['рџ’ѕ Р­РєСЃРїРѕСЂС‚ РґР°РЅРЅС‹С…']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        "?? **Облачный финансовый менеджер**\n\n"
-        "Бот работает в облаке! ??\n"
-        "Выберите действие:",
+        "рџ¤– **Р¤РёРЅР°РЅСЃРѕРІС‹Р№ РјРµРЅРµРґР¶РµСЂ**\n\n"
+        "РЈС‡РµС‚ РґРѕС…РѕРґРѕРІ, СЂР°СЃС…РѕРґРѕРІ Рё РїСЂРёР±С‹Р»Рё\n\n"
+        "Р’С‹Р±РµСЂРёС‚Рµ РґРµР№СЃС‚РІРёРµ:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
     text = update.message.text
     
-    if text == '?? Добавить запись':
-        await update.message.reply_text("?? Введите данные в формате:\n`Товар Цена Расходы Итог`\n\nПример: `iPhone 50000 1000 60000`")
+    if text == 'рџ“Љ Р”РѕР±Р°РІРёС‚СЊ Р·Р°РїРёСЃСЊ':
+        bot.user_sessions[user_id] = {'step': 'product'}
+        await update.message.reply_text("рџ“ќ Р’РІРµРґРёС‚Рµ РЅР°Р·РІР°РЅРёРµ С‚РѕРІР°СЂР°:")
     
-    elif text == '?? Статистика':
-        await update.message.reply_text("?? Статистика будет доступна после добавления функций базы данных")
+    elif text == 'рџ“€ РЎС‚Р°С‚РёСЃС‚РёРєР°':
+        stats = bot.get_statistics()
+        if not stats:
+            await update.message.reply_text("рџ“Љ РџРѕРєР° РЅРµС‚ Р·Р°РїРёСЃРµР№ РІ Р±Р°Р·Рµ")
+        else:
+            message = (
+                "рџ“Љ **РћР±С‰Р°СЏ СЃС‚Р°С‚РёСЃС‚РёРєР°:**\n\n"
+                f"рџ“‹ Р’СЃРµРіРѕ Р·Р°РїРёСЃРµР№: {stats['total_records']}\n"
+                f"рџ’° РћР±С‰Р°СЏ РІС‹СЂСѓС‡РєР°: {stats['total_revenue']:.2f} СЂСѓР±\n"
+                f"рџ’ё РћР±С‰РёРµ СЂР°СЃС…РѕРґС‹: {stats['total_expenses']:.2f} СЂСѓР±\n"
+                f"рџЋЇ РћР±С‰Р°СЏ РїСЂРёР±С‹Р»СЊ: {stats['total_profit']:.2f} СЂСѓР±\n\n"
+                f"рџ“€ Р РµРЅС‚Р°Р±РµР»СЊРЅРѕСЃС‚СЊ: {(stats['total_profit']/stats['total_revenue']*100 if stats['total_revenue'] > 0 else 0):.1f}%"
+            )
+            await update.message.reply_text(message, parse_mode='Markdown')
     
-    elif text == '?? Быстрый расчет':
-        await update.message.reply_text("?? Введите 3 числа:\n`ВходнаяЦена Расходы ИтоговаяЦена`\n\nПример: `1000 200 1500`")
+    elif text == 'рџ“‹ РџРѕСЃР»РµРґРЅРёРµ Р·Р°РїРёСЃРё':
+        records = bot.data['records'][-5:]
+        if not records:
+            await update.message.reply_text("рџ“ќ Р—Р°РїРёСЃРµР№ РїРѕРєР° РЅРµС‚")
+        else:
+            message = "рџ“‹ **РџРѕСЃР»РµРґРЅРёРµ Р·Р°РїРёСЃРё:**\n\n"
+            for record in reversed(records):
+                message += f"рџ“¦ {record['product']}: {record['final_price']} СЂСѓР± (РїСЂРёР±С‹Р»СЊ: {record['profit']:.2f} СЂСѓР±)\n"
+            await update.message.reply_text(message, parse_mode='Markdown')
+    
+    elif text == 'рџ’ѕ Р­РєСЃРїРѕСЂС‚ РґР°РЅРЅС‹С…':
+        if bot.data['records']:
+            report = "рџ“Љ Р¤РРќРђРќРЎРћР’Р«Р™ РћРўР§Р•Рў\n\n"
+            for record in bot.data['records']:
+                report += f"{record['date']} | {record['product']} | РџСЂРёР±С‹Р»СЊ: {record['profit']:.2f} СЂСѓР±\n"
+            await update.message.reply_text(f"```\n{report}\n```", parse_mode='Markdown')
+        else:
+            await update.message.reply_text("РќРµС‚ РґР°РЅРЅС‹С… РґР»СЏ СЌРєСЃРїРѕСЂС‚Р°")
+    
+    elif text == 'рџ’° Р‘С‹СЃС‚СЂС‹Р№ СЂР°СЃС‡РµС‚':
+        await update.message.reply_text(
+            "рџ§® Р’РІРµРґРёС‚Рµ 3 С‡РёСЃР»Р° С‡РµСЂРµР· РїСЂРѕР±РµР»:\n"
+            "Р’С…РѕРґРЅР°СЏ С†РµРЅР° Р Р°СЃС…РѕРґС‹ РС‚РѕРіРѕРІР°СЏ С†РµРЅР°\n\n"
+            "РџСЂРёРјРµСЂ: 1000 200 1500"
+        )
+    
+    elif user_id in bot.user_sessions:
+        session = bot.user_sessions[user_id]
+        
+        if session['step'] == 'product':
+            session['product'] = text
+            session['step'] = 'input_price'
+            await update.message.reply_text("рџ’µ Р’РІРµРґРёС‚Рµ РІС…РѕРґРЅСѓСЋ С†РµРЅСѓ:")
+        
+        elif session['step'] == 'input_price':
+            try:
+                session['input_price'] = float(text)
+                session['step'] = 'expenses'
+                await update.message.reply_text("рџ’ё Р’РІРµРґРёС‚Рµ СЂР°СЃС…РѕРґС‹:")
+            except ValueError:
+                await update.message.reply_text("вќЊ Р’РІРµРґРёС‚Рµ С‡РёСЃР»Рѕ:")
+        
+        elif session['step'] == 'expenses':
+            try:
+                session['expenses'] = float(text)
+                session['step'] = 'final_price'
+                await update.message.reply_text("рџЏ·пёЏ Р’РІРµРґРёС‚Рµ РёС‚РѕРіРѕРІСѓСЋ С†РµРЅСѓ:")
+            except ValueError:
+                await update.message.reply_text("вќЊ Р’РІРµРґРёС‚Рµ С‡РёСЃР»Рѕ:")
+        
+        elif session['step'] == 'final_price':
+            try:
+                final_price = float(text)
+                profit = bot.add_record(
+                    session['product'],
+                    session['input_price'],
+                    session['expenses'],
+                    final_price
+                )
+                
+                message = (
+                    "вњ… **Р—Р°РїРёСЃСЊ РґРѕР±Р°РІР»РµРЅР°!**\n\n"
+                    f"рџ“¦ РўРѕРІР°СЂ: {session['product']}\n"
+                    f"рџ’µ Р’С…РѕРґРЅР°СЏ С†РµРЅР°: {session['input_price']:.2f} СЂСѓР±\n"
+                    f"рџ’ё Р Р°СЃС…РѕРґС‹: {session['expenses']:.2f} СЂСѓР±\n"
+                    f"рџЏ·пёЏ РС‚РѕРіРѕРІР°СЏ С†РµРЅР°: {final_price:.2f} СЂСѓР±\n"
+                    f"рџЋЇ **РџСЂРёР±С‹Р»СЊ: {profit:.2f} СЂСѓР±**\n"
+                    f"рџ“€ Р РµРЅС‚Р°Р±РµР»СЊРЅРѕСЃС‚СЊ: {(profit/final_price*100):.1f}%"
+                )
+                await update.message.reply_text(message, parse_mode='Markdown')
+                del bot.user_sessions[user_id]
+                
+            except ValueError:
+                await update.message.reply_text("вќЊ Р’РІРµРґРёС‚Рµ С‡РёСЃР»Рѕ:")
     
     else:
-        # Обработка быстрого расчета
-        parts = text.split()
-        if len(parts) >= 3 and all(part.replace('.', '').isdigit() for part in parts[:3]):
-            try:
-                input_price = float(parts[0])
-                expenses = float(parts[1])
-                final_price = float(parts[2])
-                profit = final_price - input_price - expenses
-                
-                message = (
-                    "?? **Результат расчета:**\n\n"
-                    f"?? Входная цена: {input_price:.2f} руб\n"
-                    f"?? Расходы: {expenses:.2f} руб\n"
-                    f"??? Итоговая цена: {final_price:.2f} руб\n"
-                    f"?? **Прибыль: {profit:.2f} руб**\n"
-                    f"?? Рентабельность: {(profit/final_price*100):.1f}%"
-                )
-                await update.message.reply_text(message, parse_mode='Markdown')
-            except ValueError:
-                await update.message.reply_text("? Ошибка в числах")
-        
-        # Обработка добавления записи
-        elif len(parts) >= 4:
-            try:
-                product = parts[0]
-                input_price = float(parts[1])
-                expenses = float(parts[2])
-                final_price = float(parts[3])
-                profit = final_price - input_price - expenses
-                
-                message = (
-                    "? **Запись добавлена!**\n\n"
-                    f"?? Товар: {product}\n"
-                    f"?? Входная цена: {input_price:.2f} руб\n"
-                    f"?? Расходы: {expenses:.2f} руб\n"
-                    f"??? Итоговая цена: {final_price:.2f} руб\n"
-                    f"?? **Прибыль: {profit:.2f} руб**"
-                )
-                await update.message.reply_text(message, parse_mode='Markdown')
-            except ValueError:
-                await update.message.reply_text("? Ошибка в формате")
+        if all(part.replace('.', '').isdigit() for part in text.split()):
+            parts = text.split()
+            if len(parts) == 3:
+                try:
+                    input_price = float(parts[0])
+                    expenses = float(parts[1])
+                    final_price = float(parts[2])
+                    profit = final_price - input_price - expenses
+                    
+                    message = (
+                        "рџ§® **Р РµР·СѓР»СЊС‚Р°С‚ СЂР°СЃС‡РµС‚Р°:**\n\n"
+                        f"рџ’µ Р’С…РѕРґРЅР°СЏ С†РµРЅР°: {input_price:.2f} СЂСѓР±\n"
+                        f"рџ’ё Р Р°СЃС…РѕРґС‹: {expenses:.2f} СЂСѓР±\n"
+                        f"рџЏ·пёЏ РС‚РѕРіРѕРІР°СЏ С†РµРЅР°: {final_price:.2f} СЂСѓР±\n"
+                        f"рџЋЇ **РџСЂРёР±С‹Р»СЊ: {profit:.2f} СЂСѓР±**\n"
+                        f"рџ“€ Р РµРЅС‚Р°Р±РµР»СЊРЅРѕСЃС‚СЊ: {(profit/final_price*100):.1f}%"
+                    )
+                    await update.message.reply_text(message, parse_mode='Markdown')
+                except ValueError:
+                    await update.message.reply_text("вќЊ РћС€РёР±РєР° РІ С„РѕСЂРјР°С‚Рµ С‡РёСЃРµР»")
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    if user_id in bot.user_sessions:
+        del bot.user_sessions[user_id]
+    await update.message.reply_text("вќЊ РћРїРµСЂР°С†РёСЏ РѕС‚РјРµРЅРµРЅР°")
 
 def main():
-    if not BOT_TOKEN:
-        print("? Ошибка: BOT_TOKEN не установлен!")
-        return
-    
     application = Application.builder().token(BOT_TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("cancel", cancel))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    port = int(os.environ.get('PORT', 8443))
-    
-    # Для локального тестирования
-    if os.environ.get('RAILWAY_STATIC_URL'):
-        print("?? Запуск на Railway...")
-        application.run_webhook(
-            listen="0.0.0.0",
-            port=port,
-            url_path=BOT_TOKEN,
-            webhook_url=f"https://{os.environ.get('RAILWAY_STATIC_URL')}/{BOT_TOKEN}"
-        )
-    else:
-        print("?? Локальный запуск...")
-        application.run_polling()
+    print("рџ¤– Р‘РѕС‚ Р·Р°РїСѓСЃРєР°РµС‚СЃСЏ...")
+    application.run_polling()
 
 if __name__ == '__main__':
     main()
