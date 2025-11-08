@@ -132,6 +132,37 @@ class ProductManager:
             'total_final': total_final,
             'total_profit': total_profit
         }
+    
+    def get_statistics_by_date(self, target_date=None):
+        """Получение статистики по датам"""
+        if not self.products:
+            return None
+        
+        stats_by_date = defaultdict(lambda: {
+            'count': 0,
+            'total_cost': 0,
+            'total_expenses': 0,
+            'total_final': 0,
+            'total_profit': 0,
+            'products': []
+        })
+        
+        for product in self.products:
+            date = product['date']
+            stats_by_date[date]['count'] += 1
+            stats_by_date[date]['total_cost'] += product['cost']
+            stats_by_date[date]['total_expenses'] += product['expenses']
+            stats_by_date[date]['total_final'] += product['final_price']
+            stats_by_date[date]['total_profit'] += product['profit']
+            stats_by_date[date]['products'].append(product)
+        
+        result = dict(stats_by_date)
+        
+        # Если указана конкретная дата, возвращаем только ее
+        if target_date:
+            return {target_date: result[target_date]} if target_date in result else None
+        
+        return result
 
 # Создаем менеджер продуктов
 product_manager = ProductManager()
@@ -147,85 +178,124 @@ class States:
     EDITING_INPUT_VALUE = 7
     DELETING_SELECT_PRODUCT = 8
     VIEWING_PRODUCTS_PAGE = 9
+    SELECTING_DATE_FOR_STATS = 10
 
 # Глобальные переменные для хранения временных данных
 user_sessions = {}
 
-def format_product_card(product):
-    """Форматирование карточки товара для мобильных"""
-    return (
-        f"🆔 {product['id']}\n"
-        f"📦 {product['name']}\n"
-        f"💰 {product['cost']:.0f}₽ | 💸 {product['expenses']:.0f}₽\n"
-        f"🏷️ {product['final_price']:.0f}₽ | 🎯 {product['profit']:.0f}₽\n"
-        f"📅 {product['date']}\n"
-        f"➖➖➖➖➖➖➖➖➖"
-    )
-
-def format_products_page(products, page, total_pages, total_products):
-    """Форматирование страницы товаров для мобильных"""
+def format_detailed_product_list(products):
+    """Подробный список товаров в столбик"""
     if not products:
         return "📭 *Список товаров пуст*"
     
-    header = f"📋 *ТОВАРЫ* ({total_products} шт.) • Страница {page}/{total_pages}\n\n"
+    message = "📦 *ПОДРОБНЫЙ СПИСОК ТОВАРОВ*\n"
+    message += "═" * 35 + "\n\n"
     
-    products_text = ""
     for product in products:
-        products_text += format_product_card(product) + "\n"
-    
-    footer = f"\n📊 *Прибыль страницы:* {sum(p['profit'] for p in products):.0f}₽"
-    
-    if total_pages > 1:
-        footer += f"\n\n⬅️ *{page-1}* | *{page}* | *{page+1}* ➡️" if page < total_pages else f"\n\n⬅️ *{page-1}* | *{page}* ◀️"
-    
-    return header + products_text + footer
-
-def format_product_table_mobile(products):
-    """Компактная таблица для мобильных"""
-    if not products:
-        return "📭 *Список товаров пуст*"
-    
-    table = "📊 *ОБЗОР ТОВАРОВ*\n"
-    table += "─" * 32 + "\n"
-    
-    for product in products[:15]:
-        table += (
-            f"🆔{product['id']:3} │ "
-            f"{product['name'][:12]:12} │ "
-            f"+{product['profit']:.0f}₽\n"
+        message += (
+            f"🆔 *ID:* {product['id']}\n"
+            f"📦 *Название:* {product['name']}\n"
+            f"💰 *Стоимость:* {product['cost']:.0f}₽\n"
+            f"💸 *Расходы:* {product['expenses']:.0f}₽\n"
+            f"🏷️ *Итоговая цена:* {product['final_price']:.0f}₽\n"
+            f"🎯 *Прибыль:* {product['profit']:.0f}₽\n"
+            f"📅 *Дата:* {product['date']}\n"
+            f"─────────────────────\n\n"
         )
     
-    if len(products) > 15:
-        table += f"... и ещё {len(products) - 15} товаров\n"
-    
     total_profit = sum(p['profit'] for p in products)
-    table += f"─" * 32 + f"\n💰 *Итого: {total_profit:.0f}₽*"
+    message += f"💰 *Всего товаров:* {len(products)}\n"
+    message += f"🎯 *Общая прибыль:* {total_profit:.0f}₽"
     
-    return table
+    return message
 
-def format_statistics_mobile(stats):
-    """Статистика для мобильных"""
+def format_products_page(products, page, total_pages, total_products):
+    """Форматирование страницы товаров"""
+    if not products:
+        return "📭 *Список товаров пуст*"
+    
+    return format_detailed_product_list(products)
+
+def format_statistics_table(stats):
+    """Статистика в виде таблички для мобильных"""
     if not stats:
         return "📊 *Нет данных для статистики*"
     
-    return (
-        "📈 *СТАТИСТИКА*\n"
-        "─" * 32 + "\n"
-        f"📦 Товаров: *{stats['total_products']}*\n"
-        f"💰 Стоимость: *{stats['total_cost']:.0f}₽*\n"
-        f"💸 Расходы: *{stats['total_expenses']:.0f}₽*\n"
-        f"🏷️ Итог: *{stats['total_final']:.0f}₽*\n"
-        f"🎯 Прибыль: *{stats['total_profit']:.0f}₽*\n"
-        "─" * 32 + "\n"
-        f"📊 Рентабельность: *{(stats['total_profit']/stats['total_final']*100 if stats['total_final'] > 0 else 0):.1f}%*"
+    table = (
+        "📈 *ОБЩАЯ СТАТИСТИКА*\n"
+        "┌────────────────┬──────────┐\n"
+        f"│ 📦 Товаров     │ {stats['total_products']:>8} │\n"
+        f"│ 💰 Стоимость   │ {stats['total_cost']:>8.0f}₽ │\n"
+        f"│ 💸 Расходы     │ {stats['total_expenses']:>8.0f}₽ │\n"
+        f"│ 🏷️ Итог        │ {stats['total_final']:>8.0f}₽ │\n"
+        f"│ 🎯 Прибыль     │ {stats['total_profit']:>8.0f}₽ │\n"
+        "└────────────────┴──────────┘\n"
     )
+    
+    profitability = (stats['total_profit'] / stats['total_final'] * 100) if stats['total_final'] > 0 else 0
+    table += f"📊 *Рентабельность:* {profitability:.1f}%"
+    
+    return table
+
+def format_date_statistics(stats_by_date, target_date=None):
+    """Статистика по дате с детализацией товаров"""
+    if not stats_by_date:
+        return "📊 *Нет данных за выбранную дату*"
+    
+    if target_date:
+        # Статистика по конкретной дате
+        if target_date not in stats_by_date:
+            return f"📊 *Нет данных за {target_date}*"
+        
+        stats = stats_by_date[target_date]
+        message = f"📅 *СТАТИСТИКА ЗА {target_date}*\n"
+        message += "═" * 35 + "\n\n"
+        
+        message += (
+            f"📦 *Товаров:* {stats['count']}\n"
+            f"💰 *Общая стоимость:* {stats['total_cost']:.0f}₽\n"
+            f"💸 *Общие расходы:* {stats['total_expenses']:.0f}₽\n"
+            f"🏷️ *Общий итог:* {stats['total_final']:.0f}₽\n"
+            f"🎯 *Общая прибыль:* {stats['total_profit']:.0f}₽\n\n"
+        )
+        
+        # Детализация по товарам
+        message += "📦 *ТОВАРЫ ЗА ДЕНЬ:*\n"
+        message += "─" * 35 + "\n"
+        
+        for product in stats['products']:
+            message += (
+                f"🆔{product['id']} {product['name'][:15]}\n"
+                f"   💰{product['cost']:.0f}₽ 💸{product['expenses']:.0f}₽\n"
+                f"   🏷️{product['final_price']:.0f}₽ 🎯+{product['profit']:.0f}₽\n"
+                f"   ───────────────────\n"
+            )
+        
+        profitability = (stats['total_profit'] / stats['total_final'] * 100) if stats['total_final'] > 0 else 0
+        message += f"\n📊 *Рентабельность дня:* {profitability:.1f}%"
+        
+        return message
+    else:
+        # Общая статистика по всем датам
+        message = "📅 *СТАТИСТИКА ПО ДАТАМ*\n"
+        message += "═" * 35 + "\n\n"
+        
+        for date, stats in sorted(stats_by_date.items())[-10:]:
+            message += (
+                f"📅 *{date}*\n"
+                f"   📦 {stats['count']} тов. | "
+                f"🎯 {stats['total_profit']:.0f}₽\n"
+                f"   ───────────────────\n"
+            )
+        
+        return message
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start - главное меню"""
     keyboard = [
         ['📦 Добавить товар', '📋 Список товаров'],
-        ['📈 Общая статистика', '✏️ Редактировать'],
-        ['🗑️ Удалить товар']
+        ['📈 Общая статистика', '📅 Статистика по дате'],
+        ['✏️ Редактировать', '🗑️ Удалить товар']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -237,8 +307,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 Всего товаров: {total_products}\n\n"
         f"*Используйте кнопки для управления:*\n"
         f"• Добавить - новый товар\n"
-        f"• Список - просмотр товаров\n"
-        f"• Статистика - общая аналитика\n"
+        f"• Список - подробный просмотр\n"
+        f"• Статистика - аналитика и отчеты\n"
         f"• Редактировать - изменить товар\n"
         f"• Удалить - удалить товар",
         reply_markup=reply_markup,
@@ -261,7 +331,7 @@ async def handle_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def handle_list_products(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать список товаров с пагинацией"""
+    """Показать подробный список товаров"""
     products, total_count = product_manager.get_products_page(1, 10)
     total_pages = (total_count + 9) // 10
     
@@ -279,21 +349,11 @@ async def handle_list_products(update: Update, context: ContextTypes.DEFAULT_TYP
     message = format_products_page(products, 1, total_pages, total_count)
     
     # Клавиатура для навигации
-    keyboard = [['📋 Краткий вид']]
+    keyboard = []
     if total_pages > 1:
         keyboard.append(['➡️ Следующая страница'])
     keyboard.append(['🔙 Главное меню'])
     
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
-
-async def handle_quick_view(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Краткий вид товаров"""
-    products = product_manager.get_all_products()
-    message = format_product_table_mobile(products)
-    
-    keyboard = [['🔙 Главное меню']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
@@ -316,7 +376,7 @@ async def handle_next_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = format_products_page(products, next_page, total_pages, total_count)
             
             # Клавиатура для навигации
-            keyboard = [['📋 Краткий вид']]
+            keyboard = []
             if next_page > 1:
                 keyboard.append(['⬅️ Предыдущая страница'])
             if next_page < total_pages:
@@ -348,7 +408,7 @@ async def handle_prev_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
             message = format_products_page(products, prev_page, session['total_pages'], total_count)
             
             # Клавиатура для навигации
-            keyboard = [['📋 Краткий вид']]
+            keyboard = []
             if prev_page > 1:
                 keyboard.append(['⬅️ Предыдущая страница'])
             if prev_page < session['total_pages']:
@@ -364,9 +424,41 @@ async def handle_prev_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_list_products(update, context)
 
 async def handle_general_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать статистику"""
+    """Показать общую статистику в виде таблички"""
     stats = product_manager.get_statistics()
-    message = format_statistics_mobile(stats) if stats else "📊 *Нет данных для статистики*"
+    message = format_statistics_table(stats) if stats else "📊 *Нет данных для статистики*"
+    
+    keyboard = [
+        ['📅 Статистика по дате'],
+        ['🔙 Главное меню']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def handle_date_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Меню статистики по дате"""
+    stats_by_date = product_manager.get_statistics_by_date()
+    
+    if not stats_by_date:
+        await update.message.reply_text("📊 *Нет данных по датам*", parse_mode='Markdown')
+        return
+    
+    # Показываем доступные даты
+    available_dates = sorted(stats_by_date.keys())[-10:]  # Последние 10 дат
+    
+    message = "📅 *ВЫБОР ДАТЫ ДЛЯ СТАТИСТИКИ*\n\n"
+    message += "*Доступные даты:*\n"
+    
+    for i, date in enumerate(available_dates, 1):
+        profit = stats_by_date[date]['total_profit']
+        message += f"{i}. {date} - {profit:.0f}₽\n"
+    
+    message += "\n*Введите дату в формате ГГГГ-ММ-ДД*\n"
+    message += "Пример: 2024-01-15"
+    
+    user_id = update.message.from_user.id
+    user_sessions[user_id] = {'state': States.SELECTING_DATE_FOR_STATS}
     
     keyboard = [['🔙 Главное меню']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -384,11 +476,14 @@ async def handle_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE
     user_id = update.message.from_user.id
     user_sessions[user_id] = {'state': States.EDITING_SELECT_PRODUCT}
     
-    message = (
-        "✏️ *РЕДАКТИРОВАНИЕ ТОВАРА*\n\n"
-        f"{format_product_table_mobile(products)}\n\n"
-        "📝 *Введите ID товара для редактирования:*"
-    )
+    # Показываем краткий список для выбора
+    message = "✏️ *РЕДАКТИРОВАНИЕ ТОВАРА*\n\n"
+    message += "*Доступные товары:*\n"
+    
+    for product in products[-15:]:  # Последние 15 товаров
+        message += f"🆔{product['id']} - {product['name'][:20]} (+{product['profit']:.0f}₽)\n"
+    
+    message += "\n📝 *Введите ID товара для редактирования:*"
     
     keyboard = [['🔙 Главное меню']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -408,9 +503,13 @@ async def handle_delete_product(update: Update, context: ContextTypes.DEFAULT_TY
     
     message = (
         "🗑️ *УДАЛЕНИЕ ТОВАРА*\n\n"
-        f"{format_product_table_mobile(products)}\n\n"
-        "⚠️ *Введите ID товара для удаления:*"
+        "*Доступные товары:*\n"
     )
+    
+    for product in products[-15:]:  # Последние 15 товаров
+        message += f"🆔{product['id']} - {product['name'][:20]} (+{product['profit']:.0f}₽)\n"
+    
+    message += "\n⚠️ *Введите ID товара для удаления:*"
     
     keyboard = [['🔙 Главное меню']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -427,7 +526,13 @@ async def show_edit_fields_menu(update: Update, context: ContextTypes.DEFAULT_TY
     
     message = (
         f"✏️ *РЕДАКТИРОВАНИЕ ТОВАРА* 🆔{product_id}\n\n"
-        f"{format_product_card(product)}\n\n"
+        f"🆔 *ID:* {product['id']}\n"
+        f"📦 *Название:* {product['name']}\n"
+        f"💰 *Стоимость:* {product['cost']:.0f}₽\n"
+        f"💸 *Расходы:* {product['expenses']:.0f}₽\n"
+        f"🏷️ *Итоговая цена:* {product['final_price']:.0f}₽\n"
+        f"🎯 *Прибыль:* {product['profit']:.0f}₽\n"
+        f"📅 *Дата:* {product['date']}\n\n"
         "*Выберите поле для изменения:*\n"
         "1 📝 Название\n"
         "2 💰 Стоимость\n" 
@@ -453,9 +558,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == '📋 Список товаров':
         await handle_list_products(update, context)
         return
-    elif text == '📋 Краткий вид':
-        await handle_quick_view(update, context)
-        return
     elif text == '➡️ Следующая страница':
         await handle_next_page(update, context)
         return
@@ -464,6 +566,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     elif text == '📈 Общая статистика':
         await handle_general_statistics(update, context)
+        return
+    elif text == '📅 Статистика по дате':
+        await handle_date_statistics(update, context)
         return
     elif text == '✏️ Редактировать':
         await handle_edit_product(update, context)
@@ -480,7 +585,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session = user_sessions[user_id]
         state = session['state']
         
-        # Добавление товара
+        # Добавление товара (остается без изменений)
         if state == States.WAITING_NAME:
             user_sessions[user_id]['name'] = text
             user_sessions[user_id]['state'] = States.WAITING_COST
@@ -559,6 +664,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             except ValueError:
                 await update.message.reply_text("❌ Введите корректное число для итоговой цены")
+        
+        # Статистика по дате - ввод даты
+        elif state == States.SELECTING_DATE_FOR_STATS:
+            # Проверяем формат даты (ГГГГ-ММ-ДД)
+            try:
+                datetime.strptime(text, '%Y-%m-%d')
+                stats_by_date = product_manager.get_statistics_by_date(text)
+                message = format_date_statistics(stats_by_date, text)
+                
+                keyboard = [
+                    ['📅 Статистика по дате'],
+                    ['🔙 Главное меню']
+                ]
+                reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+                
+                await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+                del user_sessions[user_id]
+                
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ *Неверный формат даты!*\n\n"
+                    "Введите дату в формате *ГГГГ-ММ-ДД*\n"
+                    "Пример: *2024-01-15*",
+                    parse_mode='Markdown'
+                )
         
         # Редактирование - выбор товара
         elif state == States.EDITING_SELECT_PRODUCT:
@@ -731,7 +861,7 @@ def main():
         # Создаем приложение
         application = Application.builder().token(BOT_TOKEN).build()
         
-        # Добавляем обработчики (только start и общий обработчик сообщений)
+        # Добавляем обработчики
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
