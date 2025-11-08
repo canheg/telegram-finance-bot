@@ -3,10 +3,12 @@ import logging
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get('8443242516:AAGqbOkgQ2eJzQZB5OZev2ylWx94GXZ-apU')
+# ПРАВИЛЬНОЕ получение токена
+BOT_TOKEN = os.environ.get('BOT_TOKEN')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [['💰 Рассчитать прибыль']]
@@ -14,8 +16,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "🤖 **Финансовый помощник**\n\n"
-        "Введите 3 числа:\n"
-        "`Закупка Расходы Продажа`\n\n"
+        "Введите 3 числа:\n`Закупка Расходы Продажа`\n\n"
         "Пример: `1000 200 1500`",
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -25,7 +26,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
     if text == '💰 Рассчитать прибыль':
-        await update.message.reply_text("Введите 3 числа через пробел: Закупка Расходы Продажа")
+        await update.message.reply_text("Введите 3 числа: Закупка Расходы Продажа")
         return
     
     parts = text.split()
@@ -36,24 +37,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sell = float(parts[2])
             profit = sell - buy - exp
             
-            message = (
-                "📊 **Результат:**\n\n"
-                f"💰 Закупка: {buy:.2f} руб\n"
-                f"💸 Расходы: {exp:.2f} руб\n"
-                f"🏷️ Продажа: {sell:.2f} руб\n"
-                f"🎯 **Прибыль: {profit:.2f} руб**\n"
-                f"📈 Рентабельность: {(profit/sell*100):.1f}%"
-            )
-            
-            await update.message.reply_text(message, parse_mode='Markdown')
+            message = f"💰 Прибыль: {profit:.2f} руб\n📈 Рентабельность: {(profit/sell*100):.1f}%"
+            await update.message.reply_text(message)
         except:
             await update.message.reply_text("❌ Ошибка! Введите 3 числа")
-    else:
-        await update.message.reply_text("🤖 Введите 3 числа: Закупка Расходы Продажа")
 
 def main():
     if not BOT_TOKEN:
         logger.error("❌ BOT_TOKEN не найден!")
+        logger.error("Добавьте BOT_TOKEN в Environment Variables")
         return
     
     app = Application.builder().token(BOT_TOKEN).build()
