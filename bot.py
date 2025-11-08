@@ -4,6 +4,7 @@ import json
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from datetime import datetime
+from collections import defaultdict
 
 # Настройка логирования
 logging.basicConfig(
@@ -49,7 +50,8 @@ class ProductManager:
             'expenses': float(expenses),
             'final_price': float(final_price),
             'profit': float(profit),
-            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            'created_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'date': datetime.now().strftime("%Y-%m-%d")  # Добавляем дату для группировки
         }
         self.products.append(product)
         self.save_data()
@@ -66,31 +68,47 @@ class ProductManager:
                 return product
         return None
     
-    def update_product(self, product_id, name, cost, expenses, final_price):
-        """Обновление товара"""
+    def update_product_field(self, product_id, field, value):
+        """Обновление конкретного поля товара"""
         for product in self.products:
             if product['id'] == product_id:
-                product['name'] = name
-                product['cost'] = float(cost)
-                product['expenses'] = float(expenses)
-                product['final_price'] = float(final_price)
-                product['profit'] = float(final_price) - float(cost) - float(expenses)
+                if field == 'cost':
+                    product['cost'] = float(value)
+                elif field == 'expenses':
+                    product['expenses'] = float(value)
+                elif field == 'final_price':
+                    product['final_price'] = float(value)
+                elif field == 'name':
+                    product['name'] = value
+                
+                # Пересчитываем прибыль при изменении числовых полей
+                if field in ['cost', 'expenses', 'final_price']:
+                    product['profit'] = product['final_price'] - product['cost'] - product['expenses']
+                
                 product['updated_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 self.save_data()
                 return product
         return None
     
     def delete_product(self, product_id):
-        """Удаление товара"""
-        self.products = [p for p in self.products if p['id'] != product_id]
-        # Пересчитываем ID
-        for i, product in enumerate(self.products, 1):
-            product['id'] = i
-        self.save_data()
-        return True
+        """Удаление товара - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        product_to_delete = None
+        for product in self.products:
+            if product['id'] == product_id:
+                product_to_delete = product
+                break
+        
+        if product_to_delete:
+            self.products.remove(product_to_delete)
+            # Пересчитываем ID
+            for i, product in enumerate(self.products, 1):
+                product['id'] = i
+            self.save_data()
+            return True
+        return False
     
     def get_statistics(self):
-        """Получение статистики"""
+        """Получение общей статистики"""
         if not self.products:
             return None
         
@@ -107,6 +125,29 @@ class ProductManager:
             'total_final': total_final,
             'total_profit': total_profit
         }
+    
+    def get_statistics_by_date(self):
+        """Получение статистики по датам"""
+        if not self.products:
+            return None
+        
+        stats_by_date = defaultdict(lambda: {
+            'count': 0,
+            'total_cost': 0,
+            'total_expenses': 0,
+            'total_final': 0,
+            'total_profit': 0
+        })
+        
+        for product in self.products:
+            date = product['date']
+            stats_by_date[date]['count'] += 1
+            stats_by_date[date]['total_cost'] += product['cost']
+            stats_by_date[date]['total_expenses'] += product['expenses']
+            stats_by_date[date]['total_final'] += product['final_price']
+            stats_by_date[date]['total_profit'] += product['profit']
+        
+        return dict(stats_by_date)
 
 # Создаем менеджер продуктов
 product_manager = ProductManager()
@@ -117,39 +158,89 @@ class States:
     WAITING_COST = 2
     WAITING_EXPENSES = 3
     WAITING_FINAL_PRICE = 4
-    EDITING_PRODUCT = 5
+    EDITING_PRODUCT_SELECT_FIELD = 5
+    EDITING_PRODUCT_INPUT_VALUE = 6
 
 # Глобальные переменные для хранения временных данных
 user_sessions = {}
 
 def format_product_table(products):
-    """Форматирование таблицы товаров"""
+    """Красивое форматирование таблицы товаров"""
     if not products:
-        return "📭 Список товаров пуст"
+        return "📭 *Список товаров пуст*"
     
-    table = "📊 *СПИСОК ТОВАРОВ:*\n\n"
-    table += "┌─────┬──────────────────┬──────────┬─────────┬──────────┬──────────┐\n"
-    table += "│ ID  │ Название         │ Стоимость│ Расходы │ Итоговая │ Прибыль  │\n"
-    table += "├─────┼──────────────────┼──────────┼─────────┼──────────┼──────────┤\n"
+    table = "📊 *СПИСОК ТОВАРОВ*\n"
+    table += "═" * 70 + "\n"
     
+    # Заголовок таблицы
+    table += "┌─────┬──────────────────┬──────────┬─────────┬──────────┬──────────┬────────────┐\n"
+    table += "│ {:3} │ {:16} │ {:8} │ {:7} │ {:8} │ {:8} │ {:10} │\n".format(
+        "ID", "Название", "Стоимость", "Расходы", "Итог", "Прибыль", "Дата"
+    )
+    table += "├─────┼──────────────────┼──────────┼─────────┼──────────┼──────────┼────────────┤\n"
+    
+    # Данные товаров
     for product in products:
-        table += f"│ {product['id']:3d} │ {product['name'][:15]:15} │ {product['cost']:8.2f} │ {product['expenses']:7.2f} │ {product['final_price']:8.2f} │ {product['profit']:8.2f} │\n"
+        table += "│ {:3} │ {:16} │ {:8.2f} │ {:7.2f} │ {:8.2f} │ {:8.2f} │ {:10} │\n".format(
+            product['id'],
+            product['name'][:16],
+            product['cost'],
+            product['expenses'],
+            product['final_price'],
+            product['profit'],
+            product['date']
+        )
     
-    table += "└─────┴──────────────────┴──────────┴─────────┴──────────┴──────────┘"
+    table += "└─────┴──────────────────┴──────────┴─────────┴──────────┴──────────┴────────────┘\n"
+    
+    # Итоги
+    total_profit = sum(p['profit'] for p in products)
+    table += f"\n💰 *Общая прибыль: {total_profit:.2f} руб*"
+    
+    return table
+
+def format_statistics_by_date(stats_by_date):
+    """Форматирование статистики по датам"""
+    if not stats_by_date:
+        return "📊 *Нет данных для статистики по датам*"
+    
+    table = "📅 *СТАТИСТИКА ПО ДАТАМ*\n"
+    table += "═" * 80 + "\n"
+    
+    # Заголовок таблицы
+    table += "┌────────────┬───────┬──────────┬─────────┬──────────┬──────────┐\n"
+    table += "│ {:10} │ {:5} │ {:8} │ {:7} │ {:8} │ {:8} │\n".format(
+        "Дата", "Тов.", "Стоимость", "Расходы", "Итог", "Прибыль"
+    )
+    table += "├────────────┼───────┼──────────┼─────────┼──────────┼──────────┤\n"
+    
+    # Данные по датам
+    for date, stats in sorted(stats_by_date.items()):
+        table += "│ {:10} │ {:5} │ {:8.2f} │ {:7.2f} │ {:8.2f} │ {:8.2f} │\n".format(
+            date,
+            stats['count'],
+            stats['total_cost'],
+            stats['total_expenses'],
+            stats['total_final'],
+            stats['total_profit']
+        )
+    
+    table += "└────────────┴───────┴──────────┴─────────┴──────────┴──────────┘"
+    
     return table
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Команда /start"""
     keyboard = [
         ['📦 Добавить товар', '📊 Список товаров'],
-        ['📈 Статистика', '✏️ Редактировать'],
-        ['🗑️ Удалить товар']
+        ['📈 Общая статистика', '📅 Статистика по датам'],
+        ['✏️ Редактировать товар', '🗑️ Удалить товар']
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        "🤖 *Менеджер товаров*\n\n"
-        "Управление стоимостью, расходами и прибылью\n\n"
+        "🤖 *Продвинутый менеджер товаров*\n\n"
+        "📊 Учет прибыли • 📅 Статистика по датам • ✏️ Гибкое редактирование\n\n"
         "Выберите действие:",
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -161,7 +252,7 @@ async def handle_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_sessions[user_id] = {'state': States.WAITING_NAME}
     
     await update.message.reply_text(
-        "📝 *Добавление товара*\n\n"
+        "📝 *Добавление нового товара*\n\n"
         "Введите название товара:",
         parse_mode='Markdown'
     )
@@ -176,32 +267,42 @@ async def handle_list_products(update: Update, context: ContextTypes.DEFAULT_TYP
         parse_mode='Markdown'
     )
 
-async def handle_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Показать статистику"""
+async def handle_general_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать общую статистику"""
     stats = product_manager.get_statistics()
     
     if not stats:
-        await update.message.reply_text("📊 Статистика недоступна - нет товаров")
+        await update.message.reply_text("📊 *Статистика недоступна - нет товаров*", parse_mode='Markdown')
         return
     
     message = (
-        "📈 *ОБЩАЯ СТАТИСТИКА:*\n\n"
-        f"📦 Всего товаров: {stats['total_products']}\n"
-        f"💰 Общая стоимость: {stats['total_cost']:.2f} руб\n"
-        f"💸 Общие расходы: {stats['total_expenses']:.2f} руб\n"
-        f"🏷️ Общая итоговая сумма: {stats['total_final']:.2f} руб\n"
-        f"🎯 Общая прибыль: {stats['total_profit']:.2f} руб\n\n"
-        f"📊 Средняя рентабельность: {(stats['total_profit']/stats['total_final']*100 if stats['total_final'] > 0 else 0):.1f}%"
+        "📈 *ОБЩАЯ СТАТИСТИКА*\n\n"
+        f"📦 Всего товаров: *{stats['total_products']}*\n"
+        f"💰 Общая стоимость: *{stats['total_cost']:.2f} руб*\n"
+        f"💸 Общие расходы: *{stats['total_expenses']:.2f} руб*\n"
+        f"🏷️ Общая итоговая сумма: *{stats['total_final']:.2f} руб*\n"
+        f"🎯 Общая прибыль: *{stats['total_profit']:.2f} руб*\n\n"
+        f"📊 Средняя рентабельность: *{(stats['total_profit']/stats['total_final']*100 if stats['total_final'] > 0 else 0):.1f}%*"
     )
     
     await update.message.reply_text(message, parse_mode='Markdown')
+
+async def handle_statistics_by_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показать статистику по датам"""
+    stats_by_date = product_manager.get_statistics_by_date()
+    table = format_statistics_by_date(stats_by_date)
+    
+    await update.message.reply_text(
+        table,
+        parse_mode='Markdown'
+    )
 
 async def handle_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Начало редактирования товара"""
     products = product_manager.get_all_products()
     
     if not products:
-        await update.message.reply_text("❌ Нет товаров для редактирования")
+        await update.message.reply_text("❌ *Нет товаров для редактирования*", parse_mode='Markdown')
         return
     
     # Создаем клавиатуру с ID товаров
@@ -216,12 +317,41 @@ async def handle_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE
         parse_mode='Markdown'
     )
 
+async def handle_edit_select_field(update: Update, context: ContextTypes.DEFAULT_TYPE, product_id: int):
+    """Выбор поля для редактирования"""
+    product = product_manager.get_product(product_id)
+    
+    if not product:
+        await update.message.reply_text("❌ *Товар не найден*", parse_mode='Markdown')
+        return
+    
+    keyboard = [
+        ['📝 Название', '💰 Стоимость'],
+        ['💸 Расходы', '🏷️ Итоговая цена'],
+        ['🔙 Назад']
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    message = (
+        f"✏️ *Редактирование товара ID: {product_id}*\n\n"
+        f"Текущие данные:\n"
+        f"📝 Название: *{product['name']}*\n"
+        f"💰 Стоимость: *{product['cost']:.2f} руб*\n"
+        f"💸 Расходы: *{product['expenses']:.2f} руб*\n"
+        f"🏷️ Итоговая цена: *{product['final_price']:.2f} руб*\n"
+        f"🎯 Прибыль: *{product['profit']:.2f} руб*\n"
+        f"📅 Дата добавления: *{product['date']}*\n\n"
+        "Выберите поле для изменения:"
+    )
+    
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
 async def handle_delete_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Начало удаления товара"""
+    """Начало удаления товара - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
     products = product_manager.get_all_products()
     
     if not products:
-        await update.message.reply_text("❌ Нет товаров для удаления")
+        await update.message.reply_text("❌ *Нет товаров для удаления*", parse_mode='Markdown')
         return
     
     # Создаем клавиатуру с ID товаров
@@ -248,10 +378,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == '📊 Список товаров':
         await handle_list_products(update, context)
         return
-    elif text == '📈 Статистика':
-        await handle_statistics(update, context)
+    elif text == '📈 Общая статистика':
+        await handle_general_statistics(update, context)
         return
-    elif text == '✏️ Редактировать':
+    elif text == '📅 Статистика по датам':
+        await handle_statistics_by_date(update, context)
+        return
+    elif text == '✏️ Редактировать товар':
         await handle_edit_product(update, context)
         return
     elif text == '🗑️ Удалить товар':
@@ -261,62 +394,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
         return
     
-    # Обработка состояний диалога
+    # Обработка редактирования полей
     if user_id in user_sessions:
-        state = user_sessions[user_id]['state']
+        session = user_sessions[user_id]
         
-        if state == States.WAITING_NAME:
+        if session['state'] == States.WAITING_NAME:
             user_sessions[user_id]['name'] = text
             user_sessions[user_id]['state'] = States.WAITING_COST
-            await update.message.reply_text(
-                "💰 Введите стоимость товара:",
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text("💰 Введите стоимость товара:")
         
-        elif state == States.WAITING_COST:
+        elif session['state'] == States.WAITING_COST:
             try:
                 user_sessions[user_id]['cost'] = float(text)
                 user_sessions[user_id]['state'] = States.WAITING_EXPENSES
-                await update.message.reply_text(
-                    "💸 Введите расходы:",
-                    parse_mode='Markdown'
-                )
+                await update.message.reply_text("💸 Введите расходы:")
             except ValueError:
                 await update.message.reply_text("❌ Введите корректное число для стоимости")
         
-        elif state == States.WAITING_EXPENSES:
+        elif session['state'] == States.WAITING_EXPENSES:
             try:
                 user_sessions[user_id]['expenses'] = float(text)
                 user_sessions[user_id]['state'] = States.WAITING_FINAL_PRICE
-                await update.message.reply_text(
-                    "🏷️ Введите итоговую цену:",
-                    parse_mode='Markdown'
-                )
+                await update.message.reply_text("🏷️ Введите итоговую цену:")
             except ValueError:
                 await update.message.reply_text("❌ Введите корректное число для расходов")
         
-        elif state == States.WAITING_FINAL_PRICE:
+        elif session['state'] == States.WAITING_FINAL_PRICE:
             try:
                 final_price = float(text)
-                session = user_sessions[user_id]
+                session_data = user_sessions[user_id]
                 
                 # Добавляем товар
                 product = product_manager.add_product(
-                    session['name'],
-                    session['cost'],
-                    session['expenses'],
+                    session_data['name'],
+                    session_data['cost'],
+                    session_data['expenses'],
                     final_price
                 )
                 
                 # Показываем результат
                 message = (
-                    "✅ *Товар добавлен!*\n\n"
-                    f"📦 Название: {product['name']}\n"
-                    f"💰 Стоимость: {product['cost']:.2f} руб\n"
-                    f"💸 Расходы: {product['expenses']:.2f} руб\n"
-                    f"🏷️ Итоговая цена: {product['final_price']:.2f} руб\n"
-                    f"🎯 Прибыль: {product['profit']:.2f} руб\n\n"
-                    f"📈 Рентабельность: {(product['profit']/product['final_price']*100):.1f}%"
+                    "✅ *Товар успешно добавлен!*\n\n"
+                    f"📦 Название: *{product['name']}*\n"
+                    f"💰 Стоимость: *{product['cost']:.2f} руб*\n"
+                    f"💸 Расходы: *{product['expenses']:.2f} руб*\n"
+                    f"🏷️ Итоговая цена: *{product['final_price']:.2f} руб*\n"
+                    f"🎯 Прибыль: *{product['profit']:.2f} руб*\n"
+                    f"📅 Дата добавления: *{product['date']}*\n\n"
+                    f"📈 Рентабельность: *{(product['profit']/product['final_price']*100):.1f}%*"
                 )
                 
                 await update.message.reply_text(message, parse_mode='Markdown')
@@ -327,44 +452,111 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
             except ValueError:
                 await update.message.reply_text("❌ Введите корректное число для итоговой цены")
+        
+        elif session['state'] == States.EDITING_PRODUCT_INPUT_VALUE:
+            # Обработка ввода нового значения для поля
+            product_id = session['product_id']
+            field = session['field']
+            
+            try:
+                # Валидация числовых полей
+                if field in ['cost', 'expenses', 'final_price']:
+                    value = float(text)
+                else:
+                    value = text
+                
+                updated_product = product_manager.update_product_field(product_id, field, value)
+                
+                if updated_product:
+                    field_names = {
+                        'name': 'название',
+                        'cost': 'стоимость', 
+                        'expenses': 'расходы',
+                        'final_price': 'итоговую цену'
+                    }
+                    
+                    message = (
+                        f"✅ *{field_names[field].title()} успешно обновлено!*\n\n"
+                        f"📦 Товар ID: {product_id}\n"
+                        f"📝 Новое значение: *{value}*\n\n"
+                        f"💰 Стоимость: *{updated_product['cost']:.2f} руб*\n"
+                        f"💸 Расходы: *{updated_product['expenses']:.2f} руб*\n" 
+                        f"🏷️ Итоговая цена: *{updated_product['final_price']:.2f} руб*\n"
+                        f"🎯 Прибыль: *{updated_product['profit']:.2f} руб*"
+                    )
+                    
+                    await update.message.reply_text(message, parse_mode='Markdown')
+                    del user_sessions[user_id]
+                    await start(update, context)
+                else:
+                    await update.message.reply_text("❌ Ошибка при обновлении товара")
+                    
+            except ValueError:
+                await update.message.reply_text("❌ Введите корректное числовое значение")
     
-    # Обработка редактирования/удаления по ID
+    # Обработка выбора товара для редактирования/удаления
     elif text.isdigit():
         product_id = int(text)
         product = product_manager.get_product(product_id)
         
         if product:
             # Определяем контекст по предыдущему сообщению
-            if 'редактирования' in update.message.reply_to_message.text if update.message.reply_to_message else '':
-                # Режим редактирования
-                user_sessions[user_id] = {
-                    'state': States.EDITING_PRODUCT,
-                    'product_id': product_id,
-                    'current_field': 'name'
-                }
+            if update.message.reply_to_message:
+                reply_text = update.message.reply_to_message.text
                 
-                message = (
-                    f"✏️ *Редактирование товара ID: {product_id}*\n\n"
-                    f"Текущие данные:\n"
-                    f"Название: {product['name']}\n"
-                    f"Стоимость: {product['cost']:.2f}\n"
-                    f"Расходы: {product['expenses']:.2f}\n"
-                    f"Итоговая цена: {product['final_price']:.2f}\n\n"
-                    "Введите новое название:"
-                )
-                await update.message.reply_text(message, parse_mode='Markdown')
-            
-            elif 'удаления' in update.message.reply_to_message.text if update.message.reply_to_message else '':
-                # Режим удаления
-                product_manager.delete_product(product_id)
-                await update.message.reply_text(
-                    f"✅ Товар ID: {product_id} удален!",
-                    parse_mode='Markdown'
-                )
-                await start(update, context)
+                if 'редактирования' in reply_text:
+                    # Переходим к выбору поля для редактирования
+                    await handle_edit_select_field(update, context, product_id)
+                    return
+                
+                elif 'удаления' in reply_text:
+                    # Удаляем товар - ИСПРАВЛЕННАЯ ВЕРСИЯ
+                    if product_manager.delete_product(product_id):
+                        await update.message.reply_text(
+                            f"✅ *Товар ID: {product_id} успешно удален!*",
+                            parse_mode='Markdown'
+                        )
+                        await start(update, context)
+                    else:
+                        await update.message.reply_text("❌ Ошибка при удалении товара")
+                    return
         
         else:
             await update.message.reply_text("❌ Товар с таким ID не найден")
+    
+    # Обработка выбора поля для редактирования
+    elif text in ['📝 Название', '💰 Стоимость', '💸 Расходы', '🏷️ Итоговая цена']:
+        if update.message.reply_to_message and 'Выберите поле для изменения' in update.message.reply_to_message.text:
+            # Извлекаем ID товара из предыдущего сообщения
+            reply_text = update.message.reply_to_message.text
+            product_id = int(reply_text.split('ID: ')[1].split('\n')[0])
+            
+            field_map = {
+                '📝 Название': 'name',
+                '💰 Стоимость': 'cost', 
+                '💸 Расходы': 'expenses',
+                '🏷️ Итоговая цена': 'final_price'
+            }
+            
+            field = field_map[text]
+            field_names = {
+                'name': 'название',
+                'cost': 'стоимость',
+                'expenses': 'расходы', 
+                'final_price': 'итоговую цену'
+            }
+            
+            # Сохраняем в сессию
+            user_sessions[user_id] = {
+                'state': States.EDITING_PRODUCT_INPUT_VALUE,
+                'product_id': product_id,
+                'field': field
+            }
+            
+            await update.message.reply_text(
+                f"✏️ Введите новое значение для {field_names[field]}:",
+                parse_mode='Markdown'
+            )
     
     else:
         await update.message.reply_text(
